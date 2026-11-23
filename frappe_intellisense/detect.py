@@ -85,7 +85,14 @@ def resolve(start: str | Path, frappe_root: str | Path | None = None) -> SourceT
             js_root = candidate
     python_roots: list[Path] = []
     if bench is not None:
-        python_roots.append(bench / "apps")
+        apps_dir = bench / "apps"
+        python_roots.extend(
+            sorted(
+                app
+                for app in apps_dir.iterdir()
+                if app.is_dir() and (app / app.name / "__init__.py").is_file()
+            )
+        )
     elif package is not None:
         python_roots.append(package)
     return SourceTree(bench, frappe_app, package, js_root, tuple(python_roots))

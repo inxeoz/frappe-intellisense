@@ -1,11 +1,12 @@
 import json
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from frappe_intellisense.cli import _fix_venv, _write_json
+from frappe_intellisense.cli import _fix_venv, _write_json, init as cli_init
 from frappe_intellisense.detect import find_bench, find_installed_frappe, find_nearby_frappe, resolve
 from frappe_intellisense.generators.javascript import GLOBALS_FILE, globals_source, render_jsconfig
 from frappe_intellisense.generators.python import render_mypy_ini, render_pyrightconfig
@@ -65,6 +66,28 @@ class GeneratorTests(unittest.TestCase):
             self.assertIn("frappe", config["extraPaths"])
             self.assertTrue(config["useLibraryCodeForTypes"])
 
+    def test_init_does_not_create_typings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = Path(tmp) / "bench"
+            package = bench / "apps" / "frappe" / "frappe"
+            (package / "model").mkdir(parents=True)
+            (package / "public" / "js" / "frappe").mkdir(parents=True)
+            (package / "__init__.py").touch()
+            (package / "model" / "document.py").touch()
+            (bench / "sites").mkdir()
+            project = bench / "apps" / "myapp"
+            project.mkdir()
+            args = Namespace(
+                output=str(project), bench=str(bench), frappe=None, force=False,
+                no_python=False, no_js=False, no_stubs=False, local_source=None,
+                mypy=False, js=False,
+            )
+            self.assertEqual(cli_init(args), 0)
+            self.assertFalse((project / "typings").exists())
+            self.assertFalse((project / "mypy.ini").exists())
+            self.assertFalse((project / "jsconfig.json").exists())
+            self.assertFalse((project / GLOBALS_FILE).exists())
+
     def test_mirror_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "source"
@@ -82,6 +105,10 @@ class GeneratorTests(unittest.TestCase):
             self.assertTrue((destination / "frappe" / "public" / "js" / "frappe" / "request.js").is_file())
             self.assertFalse((destination / ".git").exists())
             self.assertFalse((destination / "logo.png").exists())
+            stale = destination / "stale.py"
+            stale.touch()
+            mirror_source(source, destination)
+            self.assertFalse(stale.exists())
 
     def test_get_doc_stub(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,7 +118,7 @@ class GeneratorTests(unittest.TestCase):
                 """from typing import overload
 
 @overload
-def get_doc(doctype: str, name: str) -> "Document":
+def get_doc(doctype: str, name: str, *, for_update: bool | None = None) -> "Document":
     \"\"\"Fetch a document.\"\"\"
     ...
 
@@ -102,7 +129,7 @@ def get_doc(*args, **kwargs):
             )
             generated = render_get_doc_stub(tmp)
             self.assertIn("@overload", generated)
-            self.assertIn("doctype: str, name: str", generated)
+            self.assertIn("doctype: str, name: str, *, for_update: bool | None = ...", generated)
             self.assertIn("Fetch a document.", generated)
             self.assertIn("_SingleDocument = Document", generated)
 
@@ -113,6 +140,8 @@ def get_doc(*args, **kwargs):
         self.assertIn("from typing import Any, overload", merged)
         self.assertIn("def get_doc(", merged)
         self.assertEqual(merge_document_stub(merged, generated), merged)
+        class_only = "from typing import Any\nclass Document:\n    def get_doc(self) -> Any: ...\n"
+        self.assertIn("def get_doc(*args", merge_document_stub(class_only, generated))
 
     def test_globals_template(self):
         text = globals_source()
@@ -171,9 +200,15 @@ class DetectTests(unittest.TestCase):
             (frappe_app / "model").mkdir()
             (frappe_app / "model" / "document.py").touch()
             (bench / "sites").mkdir()
+            other = bench / "apps" / "myapp" / "myapp"
+            other.mkdir(parents=True)
+            (other / "__init__.py").touch()
             tree = resolve(bench)
             self.assertEqual(tree.js_root, js_root)
-            self.assertEqual(tree.python_roots, (bench / "apps",))
+            self.assertEqual(
+                tree.python_roots,
+                (bench / "apps" / "frappe", bench / "apps" / "myapp"),
+            )
 
 
 if __name__ == "__main__":

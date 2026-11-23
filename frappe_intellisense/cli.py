@@ -64,6 +64,18 @@ def _write_json(path: Path, text: str, force: bool) -> bool:
     return _write(path, text, force)
 
 
+def _has_js_files(root: Path) -> bool:
+    suffixes = {".js", ".jsx", ".ts", ".tsx", ".vue"}
+    skip = {".git", ".venv", ".frappe-src", "node_modules", "dist", "build"}
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix not in suffixes:
+            continue
+        if any(part in skip for part in path.relative_to(root).parts):
+            continue
+        return True
+    return False
+
+
 def init(args: argparse.Namespace) -> int:
     output = Path(args.output).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -85,12 +97,13 @@ def init(args: argparse.Namespace) -> int:
 
     if not args.no_python and python_roots:
         _write_json(output / "pyrightconfig.json", render_pyrightconfig(python_roots, output), args.force)
-        _write(output / "mypy.ini", render_mypy_ini(python_roots, output), args.force)
-    if not args.no_js and js_root is not None and js_root.is_dir():
+        if args.mypy or (output / "mypy.ini").is_file():
+            _write(output / "mypy.ini", render_mypy_ini(python_roots, output), args.force)
+    if not args.no_js and (args.js or _has_js_files(output)) and js_root is not None and js_root.is_dir():
         _write(output / GLOBALS_FILE, globals_source(), args.force)
         _write_json(output / "jsconfig.json", render_jsconfig([js_root], output), args.force)
 
-    if not args.no_stubs:
+    if not args.no_stubs and (output / "typings").is_dir():
         typings = output / "typings" / "frappe"
         (typings / "model" / "utils").mkdir(parents=True, exist_ok=True)
         _write(typings / "model" / "utils" / "__init__.pyi", DECORATOR_STUB, args.force)
@@ -111,12 +124,16 @@ def init(args: argparse.Namespace) -> int:
 def doctor(args: argparse.Namespace) -> int:
     output = Path(args.output).expanduser().resolve()
     failures = 0
-    for name in ("pyrightconfig.json", "mypy.ini", "jsconfig.json", GLOBALS_FILE):
+    names = [
+        name
+        for name in ("pyrightconfig.json", "mypy.ini", "jsconfig.json", GLOBALS_FILE)
+        if (output / name).is_file()
+    ]
+    if not names:
+        print(f"no frappe-intellisense config found in {output}")
+        return 1
+    for name in names:
         path = output / name
-        if not path.is_file():
-            print(f"missing {path}")
-            failures += 1
-            continue
         print(f"found {path}")
         if name.endswith(".json"):
             config = json.loads(path.read_text(encoding="utf-8"))
@@ -182,6 +199,8 @@ def main() -> int:
     init_parser.add_argument("--no-python", action="store_true")
     init_parser.add_argument("--no-js", action="store_true")
     init_parser.add_argument("--no-stubs", action="store_true")
+    init_parser.add_argument("--mypy", action="store_true", help="generate mypy.ini even if none exists")
+    init_parser.add_argument("--js", action="store_true", help="generate JS config even if no JS files exist")
     init_parser.add_argument("--local-source", nargs="?", const=".frappe-src", default=None,
                              help="mirror Frappe source into the project for offline code viewing")
     init_parser.set_defaults(func=init)

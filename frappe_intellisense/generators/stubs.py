@@ -16,10 +16,13 @@ def simple_singledispatch(func: F) -> F: ...
 def _signature(node: ast.FunctionDef) -> tuple[str, str]:
     args: list[str] = []
     positional = [*node.args.posonlyargs, *node.args.args]
-    for arg in positional:
+    default_start = len(positional) - len(node.args.defaults)
+    for index, arg in enumerate(positional):
         text = arg.arg
         if arg.annotation is not None:
             text += ": " + ast.unparse(arg.annotation)
+        if index >= default_start:
+            text += " = ..."
         args.append(text)
     if node.args.posonlyargs:
         args.append("/")
@@ -30,10 +33,12 @@ def _signature(node: ast.FunctionDef) -> tuple[str, str]:
         args.append(text)
     elif node.args.kwonlyargs:
         args.append("*")
-    for arg in node.args.kwonlyargs:
+    for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults):
         text = arg.arg
         if arg.annotation is not None:
             text += ": " + ast.unparse(arg.annotation)
+        if default is not None:
+            text += " = ..."
         args.append(text)
     if node.args.kwarg is not None:
         text = "**" + node.args.kwarg.arg
@@ -70,7 +75,7 @@ def render_get_doc_stub(frappe_root: str | Path) -> str:
 
 
 def merge_document_stub(existing: str, generated: str) -> str:
-    if "def get_doc(" in existing:
+    if re.search(r"^def get_doc\(", existing, re.MULTILINE):
         return existing
     imports = existing.splitlines()
     if "from typing import Any" in existing:
