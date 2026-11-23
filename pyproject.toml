@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "frappe-intellisense"
+version = "0.1.0"
+description = "Editor-independent completions, hover docs and go-to-definition for Frappe"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+frappe-intellisense = "frappe_intellisense.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["frappe_intellisense"]
